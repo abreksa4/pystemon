@@ -45,6 +45,15 @@ try:
     import yaml
 except:
     exit('ERROR: Cannot import the yaml Python library. Are you sure it is installed?')
+# If these optional modules are needed we will check later if they were imported
+try:
+    import redis
+except:
+    pass
+try:
+    import sqlite3
+except:
+    pass
 
 try:
     if sys.version_info < (2, 7):
@@ -72,6 +81,7 @@ class PastieSite(threading.Thread):
     Instances of these threads are responsible for downloading the list of
     the most recent pastes and added those to the download queue.
     '''
+
     def __init__(self, name, download_url, archive_url, archive_regex):
         threading.Thread.__init__(self)
         self.kill_received = False
@@ -117,8 +127,8 @@ class PastieSite(threading.Thread):
                     for pastie in reversed(last_pasties):
                         queues[self.name].put(pastie)  # add pastie to queue
                     logger.info("Found {amount} new pasties for site {site}. There are now {qsize} pasties to be downloaded.".format(amount=len(last_pasties),
-                                                                                                          site=self.name,
-                                                                                                          qsize=queues[self.name].qsize()))
+                                                                                                                                     site=self.name,
+                                                                                                                                     qsize=queues[self.name].qsize()))
             # catch unknown errors
             except Exception as e:
                 msg = 'Thread for {name} crashed unexpectectly, '\
@@ -223,7 +233,7 @@ class Pastie():
             try:
                 self.md5 = hashlib.md5(self.pastie_content.encode('utf-8')).hexdigest()
                 logger.debug('Pastie {site} {id} has md5: "{md5}"'.format(site=self.site.name, id=self.id, md5=self.md5))
-            except Exception, e:
+            except Exception as e:
                 logger.error('Pastie {site} {id} md5 problem: {e}'.format(site=self.site.name, id=self.id, e=e))
 
     def fetch_pastie(self):
@@ -235,7 +245,7 @@ class Pastie():
             raise SystemExit('BUG: Content not set, sannot save')
         full_path = verify_directory_exists(directory) + os.sep + self.site.pastie_id_to_filename(self.id)
         if yamlconfig['redis']['queue']:
-            r = redis.StrictRedis(host=yamlconfig['redis']['server'],port=yamlconfig['redis']['port'],db=yamlconfig['redis']['database'])
+            r = redis.StrictRedis(host=yamlconfig['redis']['server'], port=yamlconfig['redis']['port'], db=yamlconfig['redis']['database'])
         if self.site.archive_compress:
             with gzip.open(full_path, 'w') as f:
                 f.write(self.pastie_content.encode('utf8'))
@@ -333,7 +343,7 @@ class Pastie():
         hash = hashlib.md5()
         hash.update(content)
 
-        mongo_col.insert({"hash":hash.hexdigest(), "matches": self.matches, "content":content})
+        mongo_col.insert({"hash": hash.hexdigest(), "matches": self.matches, "content": content})
 
     def send_email_alert(self):
         msg = MIMEMultipart()
@@ -373,9 +383,9 @@ Below (after newline) is the content of the pastie:
             # send the mail
             s.sendmail(yamlconfig['email']['from'], recipients, msg.as_string())
             s.close()
-        except smtplib.SMTPException, e:
+        except smtplib.SMTPException as e:
             logger.error("ERROR: unable to send email: {0}".format(e))
-        except Exception, e:
+        except Exception as e:
             logger.error("ERROR: unable to send email. Are your email setting correct?: {e}".format(e=e))
 
 
@@ -385,6 +395,7 @@ class PastiePasteSiteCom(Pastie):
     This class overloads the fetch_pastie function to do the form
     submit to get the raw pastie
     '''
+
     def __init__(self, site, pastie_id):
         Pastie.__init__(self, site, pastie_id)
 
@@ -406,12 +417,37 @@ class PastiePasteSiteCom(Pastie):
         return self.pastie_content
 
 
+class PastieSlexyOrg(Pastie):
+    '''
+    Custom Pastie class for the pastesite.com site
+    This class overloads the fetch_pastie function to do the form
+    submit to get the raw pastie
+    '''
+
+    def __init__(self, site, pastie_id):
+        Pastie.__init__(self, site, pastie_id)
+
+    def fetch_pastie(self):
+        validation_form_page, headers = download_url(self.url)
+        if validation_form_page:
+            htmlDom = BeautifulSoup(validation_form_page)
+            if not htmlDom:
+                return self.pastie_content
+            a = htmlDom.find('a', {'target': '_blank'})
+            if not a:
+                return self.pastie_content
+            url = "https://slexy.org{}".format(a['href'])
+            self.pastie_content, headers = download_url(url)
+        return self.pastie_content
+
+
 class PastieCdvLt(Pastie):
     '''
     Custom Pastie class for the cdv.lt site
     This class overloads the fetch_pastie function to do the form submit
     to get the raw pastie
     '''
+
     def __init__(self, site, pastie_id):
         Pastie.__init__(self, site, pastie_id)
 
@@ -432,6 +468,7 @@ class PastieSniptNet(Pastie):
     This class overloads the fetch_pastie function to do the form submit
     to get the raw pastie
     '''
+
     def __init__(self, site, pastie_id):
         Pastie.__init__(self, site, pastie_id)
 
@@ -455,6 +492,7 @@ class ThreadPasties(threading.Thread):
     Instances of these threads are responsible for downloading the pastes
     found in the queue.
     '''
+
     def __init__(self, queue, queue_name):
         threading.Thread.__init__(self)
         self.queue = queue
@@ -503,16 +541,14 @@ def main():
     # start a thread to handle the DB data
     db = None
     if yamlconfig['db'] and yamlconfig['db']['sqlite3'] and yamlconfig['db']['sqlite3']['enable']:
-        try:
-            global sqlite3
-            import sqlite3
+        try: # Check if sqlite3 is defined. If not, the module is not loaded
+            sqlite3
         except:
             exit('ERROR: Cannot import the sqlite3 Python library. Are you sure it is compiled in python?')
         db = Sqlite3Database(yamlconfig['db']['sqlite3']['file'])
         db.setDaemon(True)
         threads.append(db)
         db.start()
-    #test()
     # spawn a pool of threads per PastieSite, and pass them a queue instance
     for site in yamlconfig['site']:
         queues[site] = Queue.Queue()
@@ -525,9 +561,9 @@ def main():
     # build threads to download the last pasties
     for site_name in yamlconfig['site']:
         t = PastieSite(site_name,
-                      yamlconfig['site'][site_name]['download-url'],
-                      yamlconfig['site'][site_name]['archive-url'],
-                      yamlconfig['site'][site_name]['archive-regex'])
+                       yamlconfig['site'][site_name]['download-url'],
+                       yamlconfig['site'][site_name]['archive-url'],
+                       yamlconfig['site'][site_name]['archive-regex'])
         if 'public-url' in yamlconfig['site'][site_name] and yamlconfig['site'][site_name]['public-url']:
             t.public_url = yamlconfig['site'][site_name]['public-url']
         if 'update-min' in yamlconfig['site'][site_name] and yamlconfig['site'][site_name]['update-min']:
@@ -560,7 +596,7 @@ def load_user_agents_from_file(filename):
     global user_agents_list
     try:
         f = open(filename)
-    except Exception, e:
+    except Exception as e:
         logger.error('Configuration problem: user-agent-file "{file}" not found or not readable: {e}'.format(file=filename, e=e))
     for line in f:
         line = line.strip()
@@ -597,8 +633,8 @@ class ThreadProxyList(threading.Thread):
     def run(self):
         logger.info('ThreadProxyList started')
         while not self.kill_received:
-           mtime = os.stat(self.filename).st_mtime
-           if mtime != self.last_mtime:
+            mtime = os.stat(self.filename).st_mtime
+            if mtime != self.last_mtime:
                 logger.debug('Proxy configuration file changed. Reloading proxy list.')
                 proxies_lock.acquire()
                 load_proxies_from_file(self.filename)
@@ -610,7 +646,7 @@ def load_proxies_from_file(filename):
     global proxies_list
     try:
         f = open(filename)
-    except Exception, e:
+    except Exception as e:
         logger.error('Configuration problem: proxyfile "{file}" not found or not readable: {e}'.format(file=filename, e=e))
     for line in f:
         line = line.strip()
@@ -647,6 +683,7 @@ class NoRedirectHandler(urllib2.HTTPRedirectHandler):
     This class is only necessary to not follow HTTP redirects in webpages.
     It is used by the download_url() function
     '''
+
     def http_error_302(self, req, fp, code, msg, headers):
         infourl = urllib2.addinfourl(fp, headers, req.get_full_url())
         infourl.status = code
@@ -688,7 +725,7 @@ def download_url(url, data=None, cookie=None, loop_client=0, loop_server=0):
             response = opener.open(url)
         htmlPage = unicode(response.read(), errors='replace')
         return htmlPage, response.headers
-    except urllib2.HTTPError, e:
+    except urllib2.HTTPError as e:
         failed_proxy(random_proxy)
         logger.warning("!!Proxy error on {0}.".format(url))
         if 404 == e.code:
@@ -727,7 +764,7 @@ def download_url(url, data=None, cookie=None, loop_client=0, loop_server=0):
                 return download_url(url)
         logger.warning("ERROR: HTTP Error ##### {e} ######################## {url}".format(e=e, url=url))
         return None, None
-    except urllib2.URLError, e:
+    except urllib2.URLError as e:
         logger.debug("ERROR: URL Error ##### {e} ######################## ".format(e=e, url=url))
         if random_proxy:  # remove proxy from the list if needed
             failed_proxy(random_proxy)
@@ -757,8 +794,8 @@ def download_url(url, data=None, cookie=None, loop_client=0, loop_server=0):
         loop_server += 1
         logger.warning("Retry {nb}/{total} for {url}".format(nb=loop_server, total=retries_server, url=url))
         return download_url(url, loop_server=loop_server)
-        #logger.error("ERROR: Other HTTPlib error: {e}".format(e=e))
-        #return None, None
+        # logger.error("ERROR: Other HTTPlib error: {e}".format(e=e))
+        # return None, None
     # do NOT try to download the url again here, as we might end in enless loop
 
 
@@ -789,7 +826,7 @@ class Sqlite3Database(threading.Thread):
                     matches TEXT
                     )''')
             self.db_conn.commit()
-        except sqlite3.DatabaseError, e:
+        except sqlite3.DatabaseError as e:
             logger.error('Problem with the SQLite database {0}: {1}'.format(self.filename, e))
             return None
         # loop over the queue
@@ -802,7 +839,7 @@ class Sqlite3Database(threading.Thread):
                 # signals to queue job is done
                 self.queue.task_done()
             # catch unknown errors
-            except Exception, e:
+            except Exception as e:
                 logger.error("Thread for SQLite crashed unexpectectly, recovering...: {e}".format(e=e))
                 logger.debug(traceback.format_exc())
 
@@ -812,7 +849,7 @@ class Sqlite3Database(threading.Thread):
                 }
         self.c.execute('SELECT count(id) FROM pasties WHERE site=:site AND id=:id', data)
         pastie_in_db = self.c.fetchone()
-        #logger.debug('State of Database for pastie {site} {id} - {state}'.format(site=pastie.site.name, id=pastie.id, state=pastie_in_db))
+        # logger.debug('State of Database for pastie {site} {id} - {state}'.format(site=pastie.site.name, id=pastie.id, state=pastie_in_db))
         if pastie_in_db and pastie_in_db[0]:
             self.update(pastie)
         else:
@@ -830,7 +867,7 @@ class Sqlite3Database(threading.Thread):
                     }
             self.c.execute('INSERT INTO pasties VALUES (:site, :id, :md5, :url, :local_path, :timestamp, :matches)', data)
             self.db_conn.commit()
-        except sqlite3.DatabaseError, e:
+        except sqlite3.DatabaseError as e:
             logger.error('Cannot add pastie {site} {id} in the SQLite database: {error}'.format(site=pastie.site.name, id=pastie.id, error=e))
         logger.debug('Added pastie {site} {id} in the SQLite database.'.format(site=pastie.site.name, id=pastie.id))
 
@@ -851,7 +888,7 @@ class Sqlite3Database(threading.Thread):
                                             matches = :matches
                      WHERE site = :site AND id = :id''', data)
             self.db_conn.commit()
-        except sqlite3.DatabaseError, e:
+        except sqlite3.DatabaseError as e:
             logger.error('Cannot add pastie {site} {id} in the SQLite database: {error}'.format(site=pastie.site.name, id=pastie.id, error=e))
         logger.debug('Updated pastie {site} {id} in the SQLite database.'.format(site=pastie.site.name, id=pastie.id))
 
@@ -862,7 +899,7 @@ def parse_config_file(configfile):
         yamlconfig = yaml.load(file(configfile))
         for includes in yamlconfig.get("includes", []):
             yamlconfig.update(yaml.load(open(includes)))
-    except yaml.YAMLError, exc:
+    except yaml.YAMLError as exc:
         logger.error("Error in configuration file:")
         if hasattr(exc, 'problem_mark'):
             mark = exc.problem_mark
@@ -892,14 +929,14 @@ def parse_config_file(configfile):
             global mongo_col
             mongo_col = db[collection]
 
-
         except:
             exit('ERROR: Cannot import PyMongo. Are you sure it is installed ?')
     if yamlconfig['redis']['queue']:
-        try:
-            import redis
+        try: # Check if redis is defined. If not, the module is not loaded
+            redis
         except:
             exit('ERROR: Cannot import the redis Python library. Are you sure it is installed?')
+
 
 def main_as_daemon():
     try:
@@ -910,11 +947,11 @@ def main_as_daemon():
             pid_file = open('pid', 'w')
             pid_file.write(str(pid))
             pid_file.close()
-            print 'pystemon started as daemon'
-            print 'PID: %d' % pid
+            print('pystemon started as daemon')
+            print('PID: %d' % pid)
             os._exit(0)
 
-    except OSError, error:
+    except OSError as error:
         logger.error('Unable to fork, can\'t run as daemon. Error: {id} {error}'.format(id=error.errno, error=error.strerror))
         os._exit(1)
 
@@ -962,7 +999,6 @@ if __name__ == "__main__":
     else:
         logger.setLevel(logging.INFO)
 
-
     if not options.daemon:
         formatter = logging.Formatter('[%(asctime)s] %(message)s')
         hdlr = logging.StreamHandler(sys.stdout)
@@ -984,14 +1020,13 @@ if __name__ == "__main__":
             pid = f.read()
             f.close()
             os.remove('pid')
-            print "Sending signal to pid: {}".format(pid)
+            print("Sending signal to pid: {}".format(pid))
             os.kill(int(pid), 2)
             os._exit(0)
         else:
-            print "PID file not found. Nothing to do."
+            print("PID file not found. Nothing to do.")
             os._exit(0)
     if options.daemon:
         main_as_daemon()
     else:
         main()
-

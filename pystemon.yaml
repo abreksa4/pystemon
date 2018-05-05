@@ -2,8 +2,8 @@
 #  ip: '1.1.1.1'  # Specify source IP address if you want to bind on a specific one
 
 archive:
-  save: yes             # Keep
-  save-all: yes          # Keep a copy of all pasties
+  save: yes             # Keep a copy of pasties that triggered alerts
+  save-all: yes         # Keep a copy of all pasties
   dir: "alerts"         # Directory where matching pasties should be kept
   dir-all: "archive"    # Directory where all pasties should be kept (if save-all is set to yes)
   compress: yes         # Store the pasties compressed
@@ -42,8 +42,11 @@ email:
 # Definition of regular expressions to search for in the pasties
 #
 search:
-#  - description: ''    # (optional) A human readable description. (used in alerting)
-#    search: ''         # The regular expression to search for
+#  - description: ''    # (optional) A human readable description used in alerts.
+#                       #            If left unspecified the search regular expression
+#                       #            will be used as description.
+#    search: ''         # The regular expression to search for. Multiple regular expressions
+#                       #            can be used under a single description.
 #    count: ''          # (optional) How many hits should it have to be interesting?
 #    exclude: ''        # (optional) Do not alert if this regular expression matches
 #    regex-flags: ''    # (optional) Regular expression flags to give to the find function.
@@ -91,9 +94,9 @@ site:
 
   # See https://pastebin.com/api_scraping_faq , you will need a pro account on pastebin
   pastebin.com_pro:
-    archive-url: 'https://pastebin.com/api_scraping.php?limit=500'
+    archive-url: 'hhttps://scrape.pastebin.com/api_scraping.php?limit=500'
     archive-regex: '"key": "(.+)",'
-    download-url: 'https://pastebin.com/api_scrape_item.php?i={id}'
+    download-url: 'https://scrape.pastebin.com/api_scrape_item.php?i={id}'
     public-url: 'https://pastebin.com/raw/{id}'
     update-max: 50
     update-min: 40
@@ -110,9 +113,10 @@ site:
 #    download-url: 'http://nopaste.me/download/{id}.txt'
 
   slexy.org:
-    archive-url: 'http://slexy.org/recent'
+    archive-url: 'https://slexy.org/recent'
     archive-regex: '<a href="/view/([a-zA-Z0-9]+)">View paste</a>'
-    download-url: 'http://slexy.org/raw/{id}'
+    download-url: 'https://slexy.org/view/{id}'
+    pastie-classname: PastieSlexyOrg
 
 #Site is no longer accepting new users or pastes
 # pastesite.com:
